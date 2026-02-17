@@ -125,23 +125,31 @@ const player = {
 
 const startPos = { x: player.x, y: player.y };
 
-// Enemies (goombas)
+// Enemies - type: 'goomba' or 'koopa'
 const enemies = [];
 const enemySpawns = [
-    12, 18, 28, 35, 48, 55, 65, 78, 88, 98,
-    105, 113, 125, 135, 148, 155, 165, 175
+    // [column, type]
+    [12, 'goomba'], [18, 'goomba'], [28, 'koopa'], [35, 'goomba'],
+    [48, 'goomba'], [55, 'koopa'], [65, 'goomba'], [78, 'koopa'],
+    [88, 'goomba'], [98, 'koopa'], [105, 'goomba'], [113, 'koopa'],
+    [125, 'goomba'], [135, 'koopa'], [148, 'goomba'], [155, 'koopa'],
+    [165, 'goomba'], [175, 'koopa']
 ];
-for (const c of enemySpawns) {
+for (const [c, type] of enemySpawns) {
+    const isKoopa = type === 'koopa';
     enemies.push({
+        type,
         x: c * TILE,
-        y: 12 * TILE,
-        w: 28,
-        h: 28,
-        vx: -1.2,
+        y: (isKoopa ? 11 : 12) * TILE,
+        w: isKoopa ? 26 : 28,
+        h: isKoopa ? 36 : 28,
+        vx: isKoopa ? -1.8 : -1.2,
         vy: 0,
         onGround: false,
-        jumpTimer: Math.random() * 120 | 0, // stagger initial jumps
+        jumpTimer: Math.random() * 120 | 0,
         alive: true,
+        shell: false,       // koopa only: retreated into shell
+        shellTimer: 0,      // time in shell before re-emerging
         frame: 0,
         frameTimer: 0,
     });
@@ -346,13 +354,28 @@ function updateEnemies() {
             }
         }
 
-        // Jump periodically when on ground
-        if (e.onGround) {
+        // Jump periodically when on ground (not when in shell)
+        if (e.onGround && !e.shell) {
             e.jumpTimer--;
             if (e.jumpTimer <= 0) {
-                e.vy = -9 - Math.random() * 3; // varied jump height
+                const force = e.type === 'koopa' ? -11 - Math.random() * 2 : -9 - Math.random() * 3;
+                e.vy = force;
                 e.onGround = false;
-                e.jumpTimer = 60 + (Math.random() * 80 | 0); // 1-2.3 sec between jumps
+                e.jumpTimer = e.type === 'koopa'
+                    ? 40 + (Math.random() * 60 | 0)   // koopas jump more often
+                    : 60 + (Math.random() * 80 | 0);
+            }
+        }
+
+        // Shell logic for koopas
+        if (e.shell) {
+            e.shellTimer--;
+            if (e.shellTimer <= 0) {
+                // Re-emerge from shell
+                e.shell = false;
+                e.h = 36;
+                e.y -= 8; // adjust position so it doesn't clip into ground
+                e.vx = player.x > e.x ? -1.8 : 1.8; // walk away from player
             }
         }
 
@@ -374,24 +397,73 @@ function updateEnemies() {
         // Player collision
         if (rectCollide(player, e)) {
             if (player.vy > 0 && player.y + player.h - e.y < 16) {
-                // Stomp!
-                e.alive = false;
+                // Stomp from above!
                 player.vy = JUMP_FORCE * 0.6;
-                score += 20;
-                // Squish particles
-                for (let i = 0; i < 8; i++) {
-                    particles.push({
-                        x: e.x + e.w / 2,
-                        y: e.y + e.h,
-                        vx: (Math.random() - 0.5) * 6,
-                        vy: -Math.random() * 3,
-                        life: 20,
-                        color: '#8B4513',
-                        size: 4,
-                    });
+
+                if (e.type === 'koopa' && !e.shell) {
+                    // Koopa retreats into shell
+                    e.shell = true;
+                    e.shellTimer = 180; // 3 seconds in shell
+                    e.vx = 0;
+                    e.h = 24; // shorter in shell
+                    e.y += 12; // adjust so it sits on ground
+                    score += 15;
+                    for (let i = 0; i < 4; i++) {
+                        particles.push({
+                            x: e.x + e.w / 2,
+                            y: e.y,
+                            vx: (Math.random() - 0.5) * 4,
+                            vy: -Math.random() * 3 - 1,
+                            life: 15,
+                            color: '#228B22',
+                            size: 3,
+                        });
+                    }
+                } else {
+                    // Kill goomba or shell-koopa
+                    e.alive = false;
+                    score += e.type === 'koopa' ? 40 : 20;
+                    const color = e.type === 'koopa' ? '#228B22' : '#8B4513';
+                    for (let i = 0; i < 8; i++) {
+                        particles.push({
+                            x: e.x + e.w / 2,
+                            y: e.y + e.h,
+                            vx: (Math.random() - 0.5) * 6,
+                            vy: -Math.random() * 3,
+                            life: 20,
+                            color,
+                            size: 4,
+                        });
+                    }
                 }
+            } else if (e.shell && e.vx === 0) {
+                // Kick the shell!
+                e.vx = player.x < e.x ? 6 : -6;
+                score += 5;
             } else {
                 loseLife();
+            }
+        }
+
+        // Shell kills other enemies
+        if (e.shell && Math.abs(e.vx) > 2) {
+            for (const other of enemies) {
+                if (other === e || !other.alive) continue;
+                if (rectCollide(e, other)) {
+                    other.alive = false;
+                    score += 20;
+                    for (let i = 0; i < 6; i++) {
+                        particles.push({
+                            x: other.x + other.w / 2,
+                            y: other.y + other.h / 2,
+                            vx: (Math.random() - 0.5) * 6,
+                            vy: -Math.random() * 4,
+                            life: 20,
+                            color: other.type === 'koopa' ? '#228B22' : '#8B4513',
+                            size: 4,
+                        });
+                    }
+                }
             }
         }
 
@@ -720,39 +792,125 @@ function drawEnemies() {
         const sx = e.x - camera.x;
         if (sx < -TILE || sx > VIEW_W + TILE) continue;
 
-        // Body
-        ctx.fillStyle = COLORS.enemy;
-        ctx.fillRect(sx + 2, e.y + 4, 24, 18);
+        if (e.type === 'koopa') {
+            drawKoopa(e, sx);
+        } else {
+            drawGoomba(e, sx);
+        }
+    }
+}
 
-        // Head (rounded)
+function drawGoomba(e, sx) {
+    // Body
+    ctx.fillStyle = COLORS.enemy;
+    ctx.fillRect(sx + 2, e.y + 4, 24, 18);
+
+    // Head (rounded)
+    ctx.beginPath();
+    ctx.fillStyle = COLORS.enemy;
+    ctx.arc(sx + 14, e.y + 8, 12, Math.PI, 0);
+    ctx.fill();
+
+    // Eyes
+    ctx.fillStyle = '#FFF';
+    ctx.fillRect(sx + 6, e.y + 6, 6, 6);
+    ctx.fillRect(sx + 16, e.y + 6, 6, 6);
+    ctx.fillStyle = '#000';
+    const eyeOff = e.vx > 0 ? 2 : 0;
+    ctx.fillRect(sx + 8 + eyeOff, e.y + 8, 3, 3);
+    ctx.fillRect(sx + 18 + eyeOff, e.y + 8, 3, 3);
+
+    // Eyebrows (angry)
+    ctx.fillStyle = COLORS.enemyDark;
+    ctx.fillRect(sx + 5, e.y + 4, 8, 2);
+    ctx.fillRect(sx + 15, e.y + 4, 8, 2);
+
+    // Feet
+    ctx.fillStyle = COLORS.enemyDark;
+    if (e.frame === 0) {
+        ctx.fillRect(sx + 2, e.y + 22, 8, 6);
+        ctx.fillRect(sx + 18, e.y + 22, 8, 6);
+    } else {
+        ctx.fillRect(sx + 4, e.y + 22, 8, 6);
+        ctx.fillRect(sx + 16, e.y + 22, 8, 6);
+    }
+}
+
+function drawKoopa(e, sx) {
+    if (e.shell) {
+        // Shell mode - green rounded shell
+        const blink = e.shellTimer < 60 && e.shellTimer % 10 < 5;
+        ctx.fillStyle = blink ? '#90EE90' : '#228B22';
         ctx.beginPath();
-        ctx.fillStyle = COLORS.enemy;
-        ctx.arc(sx + 14, e.y + 8, 12, Math.PI, 0);
+        ctx.ellipse(sx + e.w / 2, e.y + e.h / 2, e.w / 2, e.h / 2, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // Eyes
-        ctx.fillStyle = '#FFF';
-        ctx.fillRect(sx + 6, e.y + 6, 6, 6);
-        ctx.fillRect(sx + 16, e.y + 6, 6, 6);
-        ctx.fillStyle = '#000';
-        const eyeOff = e.vx > 0 ? 2 : 0;
-        ctx.fillRect(sx + 8 + eyeOff, e.y + 8, 3, 3);
-        ctx.fillRect(sx + 18 + eyeOff, e.y + 8, 3, 3);
+        // Shell pattern
+        ctx.strokeStyle = '#006400';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.ellipse(sx + e.w / 2, e.y + e.h / 2, e.w / 2 - 3, e.h / 2 - 3, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        // Hexagon pattern on shell
+        ctx.beginPath();
+        ctx.moveTo(sx + 6, e.y + e.h / 2);
+        ctx.lineTo(sx + e.w - 6, e.y + e.h / 2);
+        ctx.stroke();
 
-        // Eyebrows (angry)
-        ctx.fillStyle = COLORS.enemyDark;
-        ctx.fillRect(sx + 5, e.y + 4, 8, 2);
-        ctx.fillRect(sx + 15, e.y + 4, 8, 2);
+        // Shell highlight
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.beginPath();
+        ctx.ellipse(sx + e.w / 2 - 3, e.y + e.h / 2 - 3, 4, 3, -0.5, 0, Math.PI * 2);
+        ctx.fill();
+        return;
+    }
 
-        // Feet
-        ctx.fillStyle = COLORS.enemyDark;
-        if (e.frame === 0) {
-            ctx.fillRect(sx + 2, e.y + 22, 8, 6);
-            ctx.fillRect(sx + 18, e.y + 22, 8, 6);
-        } else {
-            ctx.fillRect(sx + 4, e.y + 22, 8, 6);
-            ctx.fillRect(sx + 16, e.y + 22, 8, 6);
-        }
+    // Full koopa - head
+    ctx.fillStyle = '#AADD44';
+    ctx.beginPath();
+    ctx.arc(sx + 13, e.y + 8, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eyes
+    ctx.fillStyle = '#FFF';
+    ctx.fillRect(sx + 8, e.y + 4, 6, 6);
+    ctx.fillRect(sx + 16, e.y + 4, 6, 6);
+    ctx.fillStyle = '#000';
+    const eyeOff = e.vx > 0 ? 2 : 0;
+    ctx.fillRect(sx + 10 + eyeOff, e.y + 6, 3, 3);
+    ctx.fillRect(sx + 18 + eyeOff, e.y + 6, 3, 3);
+
+    // Shell body
+    ctx.fillStyle = '#228B22';
+    ctx.beginPath();
+    ctx.ellipse(sx + 13, e.y + 22, 12, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Shell pattern
+    ctx.strokeStyle = '#006400';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(sx + 13, e.y + 22, 9, 7, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Shell highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.beginPath();
+    ctx.ellipse(sx + 9, e.y + 18, 4, 3, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Belly
+    ctx.fillStyle = '#FFFFCC';
+    ctx.fillRect(sx + 8, e.y + 26, 10, 4);
+
+    // Feet
+    ctx.fillStyle = '#DAA520';
+    if (e.frame === 0) {
+        ctx.fillRect(sx + 2, e.y + 30, 8, 6);
+        ctx.fillRect(sx + 16, e.y + 30, 8, 6);
+    } else {
+        ctx.fillRect(sx + 4, e.y + 30, 8, 6);
+        ctx.fillRect(sx + 14, e.y + 30, 8, 6);
     }
 }
 
@@ -833,12 +991,18 @@ function restartGame() {
     particles.length = 0;
     // Reset enemies
     for (let i = 0; i < enemies.length; i++) {
-        enemies[i].x = enemySpawns[i] * TILE;
-        enemies[i].y = 12 * TILE;
-        enemies[i].vx = -1.2;
+        const [col, type] = enemySpawns[i];
+        const isKoopa = type === 'koopa';
+        enemies[i].x = col * TILE;
+        enemies[i].y = (isKoopa ? 11 : 12) * TILE;
+        enemies[i].w = isKoopa ? 26 : 28;
+        enemies[i].h = isKoopa ? 36 : 28;
+        enemies[i].vx = isKoopa ? -1.8 : -1.2;
         enemies[i].vy = 0;
         enemies[i].onGround = false;
         enemies[i].jumpTimer = Math.random() * 120 | 0;
+        enemies[i].shell = false;
+        enemies[i].shellTimer = 0;
         enemies[i].alive = true;
     }
     keys[' '] = false;
