@@ -138,6 +138,9 @@ for (const c of enemySpawns) {
         w: 28,
         h: 28,
         vx: -1.2,
+        vy: 0,
+        onGround: false,
+        jumpTimer: Math.random() * 120 | 0, // stagger initial jumps
         alive: true,
         frame: 0,
         frameTimer: 0,
@@ -320,12 +323,37 @@ function updateEnemies() {
             e.frameTimer = 0;
         }
 
-        // Ground collision
-        const below = getTile(e.x + e.w / 2, e.y + e.h + 2);
-        if (!isSolid(below)) {
-            e.y += 3; // Simple gravity for enemies
-        } else {
-            e.y = Math.floor((e.y + e.h) / TILE) * TILE - e.h;
+        // Gravity
+        e.vy += GRAVITY;
+        if (e.vy > 12) e.vy = 12;
+        e.y += e.vy;
+        e.onGround = false;
+
+        // Ground / vertical collision
+        const eBot = e.y + e.h;
+        for (let r = Math.floor(e.y / TILE); r <= Math.floor((eBot - 1) / TILE); r++) {
+            for (let c = Math.floor(e.x / TILE); c <= Math.floor((e.x + e.w - 1) / TILE); c++) {
+                if (r >= 0 && r < ROWS && c >= 0 && c < COLS && isSolid(level[r][c])) {
+                    if (e.vy > 0) {
+                        e.y = r * TILE - e.h;
+                        e.vy = 0;
+                        e.onGround = true;
+                    } else if (e.vy < 0) {
+                        e.y = (r + 1) * TILE;
+                        e.vy = 0;
+                    }
+                }
+            }
+        }
+
+        // Jump periodically when on ground
+        if (e.onGround) {
+            e.jumpTimer--;
+            if (e.jumpTimer <= 0) {
+                e.vy = -9 - Math.random() * 3; // varied jump height
+                e.onGround = false;
+                e.jumpTimer = 60 + (Math.random() * 80 | 0); // 1-2.3 sec between jumps
+            }
         }
 
         // Wall collision - reverse direction
@@ -334,11 +362,13 @@ function updateEnemies() {
             e.vx *= -1;
         }
 
-        // Edge detection
-        const edgeX = e.vx > 0 ? e.x + e.w + 2 : e.x - 2;
-        const edgeBelow = getTile(edgeX, e.y + e.h + 4);
-        if (!isSolid(edgeBelow) && getTile(e.x + e.w / 2, e.y + e.h + 2) !== 0) {
-            e.vx *= -1;
+        // Edge detection (only when on ground)
+        if (e.onGround) {
+            const edgeX = e.vx > 0 ? e.x + e.w + 2 : e.x - 2;
+            const edgeBelow = getTile(edgeX, e.y + e.h + 4);
+            if (!isSolid(edgeBelow)) {
+                e.vx *= -1;
+            }
         }
 
         // Player collision
@@ -806,6 +836,9 @@ function restartGame() {
         enemies[i].x = enemySpawns[i] * TILE;
         enemies[i].y = 12 * TILE;
         enemies[i].vx = -1.2;
+        enemies[i].vy = 0;
+        enemies[i].onGround = false;
+        enemies[i].jumpTimer = Math.random() * 120 | 0;
         enemies[i].alive = true;
     }
     keys[' '] = false;
