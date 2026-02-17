@@ -354,16 +354,13 @@ function updateEnemies() {
             }
         }
 
-        // Jump periodically when on ground (not when in shell)
-        if (e.onGround && !e.shell) {
+        // Only koopas jump periodically (not goombas, not when in shell)
+        if (e.type === 'koopa' && e.onGround && !e.shell) {
             e.jumpTimer--;
             if (e.jumpTimer <= 0) {
-                const force = e.type === 'koopa' ? -11 - Math.random() * 2 : -9 - Math.random() * 3;
-                e.vy = force;
+                e.vy = -11 - Math.random() * 2;
                 e.onGround = false;
-                e.jumpTimer = e.type === 'koopa'
-                    ? 40 + (Math.random() * 60 | 0)   // koopas jump more often
-                    : 60 + (Math.random() * 80 | 0);
+                e.jumpTimer = 40 + (Math.random() * 60 | 0);
             }
         }
 
